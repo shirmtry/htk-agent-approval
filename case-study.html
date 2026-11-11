@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<title>HTK Agent Approval — Case Study</title>
+<style>
+  @page { size: A4; margin: 17mm 16mm 16mm; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "Inter", Arial, sans-serif;
+    color: #15202f;
+    font-size: 10.2pt;
+    line-height: 1.55;
+  }
+  h1, h2, h3 { color: #0b1220; margin: 0; }
+  h1 { font-size: 30pt; letter-spacing: -0.5pt; line-height: 1.1; }
+  h2 {
+    font-size: 15pt;
+    margin: 0 0 10pt;
+    padding-bottom: 5pt;
+    border-bottom: 2px solid #6366f1;
+  }
+  h3 { font-size: 11pt; margin: 12pt 0 4pt; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 8pt 16pt; padding: 0; }
+  li { margin-bottom: 3pt; }
+  code {
+    font-family: "Cascadia Mono", Consolas, monospace;
+    background: #eef2ff;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 9pt;
+  }
+  .sheet { page-break-after: always; min-height: 250mm; }
+  .sheet:last-child { page-break-after: auto; }
+  .cover { display: flex; flex-direction: column; justify-content: space-between; min-height: 255mm; }
+  .eyebrow { font-size: 9pt; letter-spacing: 0.22em; text-transform: uppercase; color: #4f46e5; font-weight: 700; }
+  .cover-rule { width: 64pt; height: 4pt; background: #6366f1; margin: 18pt 0; }
+  .cover-sub { font-size: 13pt; color: #334155; max-width: 130mm; }
+  .meta { font-size: 10pt; color: #475569; }
+  .meta strong { color: #0b1220; }
+  .arch {
+    font-family: "Cascadia Mono", Consolas, monospace;
+    font-size: 8.2pt;
+    line-height: 1.5;
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 10pt 12pt;
+    white-space: pre;
+    margin: 8pt 0 10pt;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 6pt 0 10pt; font-size: 9.4pt; }
+  th, td { text-align: left; padding: 4pt 6pt; border-bottom: 1px solid #dbe3ee; vertical-align: top; }
+  th { background: #eef2ff; color: #0b1220; }
+  .note { background: #eef2ff; border-left: 3px solid #6366f1; padding: 7pt 10pt; margin: 8pt 0; color: #1e1b4b; }
+  .warn { background: #fff7ed; border-left: 3px solid #f59e0b; padding: 7pt 10pt; margin: 8pt 0; color: #57350a; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14pt; }
+  .kpi { border: 1px solid #dbe3ee; border-radius: 6px; padding: 7pt 9pt; }
+  .kpi b { display: block; font-size: 15pt; color: #4f46e5; }
+  .kpi span { font-size: 8.6pt; color: #475569; }
+  .small { font-size: 8.8pt; color: #475569; }
+</style>
+</head>
+<body>
+
+<section class="sheet cover">
+  <div>
+    <div class="eyebrow">Case Study · Agent Runtime</div>
+    <div class="cover-rule"></div>
+    <h1>HTK Agent Approval</h1>
+    <p class="cover-sub">Human-in-the-loop cho AI agent: state machine lưu bền vững, sandbox idempotent, phê duyệt diff và audit đầy đủ.</p>
+  </div>
+  <div>
+    <div class="two">
+      <div class="kpi"><b>7/7</b><span>run E2E hoàn tất trên bản live</span></div>
+      <div class="kpi"><b>2/2</b><span>outbox sau khi tick lại (idempotent)</span></div>
+    </div>
+    <p class="meta" style="margin-top:16pt">
+      <strong>Tác giả:</strong> HTK 0396241674<br />
+      <strong>Ngày:</strong> 11/11/2026<br />
+      <strong>Live:</strong> htk-agent-approval.vercel.app
+    </p>
+  </div>
+</section>
+
+<section class="sheet">
+  <h2>1. Bài toán</h2>
+  <p>
+    Một agent có thể nâng phiên bản dependency, đổi feature config hoặc gửi email hàng loạt. Giá trị của
+    tự động hóa nằm ở chỗ con người không phải làm từng thao tác; rủi ro nằm ở chỗ agent hành động khi
+    chưa được phép, hoặc hành động hai lần vì một lần retry.
+  </p>
+  <h3>Bốn kiểu thất bại điển hình</h3>
+  <ul>
+    <li><strong>Mất trạng thái khi process chết.</strong> Nếu bước đang chạy chỉ nằm trong RAM, restart sẽ
+        không biết đã validate hay chưa, đã gửi email hay chưa.</li>
+    <li><strong>Retry gây tác dụng phụ kép.</strong> Worker thử lại bước apply sau timeout mơ hồ có thể
+        ghi đè hoặc gửi trùng, dù lần đầu đã thành công.</li>
+    <li><strong>Phê duyệt không có bằng chứng.</strong> Một nút “Approve” không kèm diff, risk và lịch sử
+        bước là phê duyệt mù; quyết định không được lưu lại thì không thể điều tra sau.</li>
+    <li><strong>Không có vùng cách ly.</strong> Cho agent chạy lệnh shell hoặc gửi email thật trong demo
+        biến lỗi nhỏ thành sự cố không thể hoàn tác.</li>
+  </ul>
+  <h3>Mục tiêu đo được</h3>
+  <ul>
+    <li>Mỗi bước của mỗi run được ghi vào DB với trạng thái, số lần thử, output và thời điểm.</li>
+    <li>Worker tuyệt đối không vượt bước <code>await_approval</code> nếu chưa có quyết định của con người.</li>
+    <li>Apply lại cùng một run không tạo bản ghi thứ hai; bước verify đọc lại dữ liệu để chứng minh.</li>
+    <li>Retry tối đa 3 lần, run hết hạn sau 24 giờ, mọi chuyển trạng thái đều có audit.</li>
+  </ul>
+  <div class="note">
+    Đối tượng sử dụng: platform engineer và DevOps cần giao việc cho agent nhưng vẫn giữ quyền quyết định
+    ở các thay đổi có rủi ro. Demo dùng ba loại tác vụ đại diện: bump dependency, đổi config, gửi email hàng loạt.
+  </div>
+</section>
+
+<section class="sheet">
+  <h2>2. Giải pháp</h2>
+  <p>
+    Ứng dụng là một Next.js full-stack trên Vercel. Mỗi đề xuất là một run có state machine 5 bước, được
+    lưu trong PostgreSQL (PGlite) và snapshot lên Vercel Blob private. Worker là endpoint tick chạy trong
+    Node runtime, không phải process nền thường trực.
+  </p>
+
+  <div class="arch">Browser (workspace)
+   │  fetch JSON + session cookie httpOnly
+   ▼
+Next.js route handlers (Vercel Node, maxDuration 30s)
+   ├─ POST /api/runs          planner → diff + risk → run + 5 steps
+   ├─ POST /api/runs/action   approve / reject / pause / resume
+   ├─ POST /api/worker/tick   advance tối đa 5 run × 6 bước
+   ├─ GET  /api/runs          run + steps + output
+   └─ GET  /api/audit, /api/metrics
+   │
+   ▼
+PGlite (PostgreSQL WASM)
+   runs ──< run_steps            trạng thái từng bước
+   runs ──< tool_calls           idempotency_key UNIQUE
+   sandbox_state, outbox         vùng áp dụng cô lập
+   audit_logs, rate_limits, request_logs
+   │  JSON snapshot sau mỗi mutation
+   ▼
+Vercel Blob private  state/agent-approval.json</div>
+
+  <h3>State machine</h3>
+  <div class="arch">queued ──tick──► running ──validate──► simulate ──► await_approval
+                                                                    │
+                              ┌──────────── reject ─────────────────┤
+                              │                                     │ approve
+                              ▼                                     ▼
+                          rejected                              approved
+                                                                    │ tick
+                                                                    ▼
+                                              apply ──► verify ──► completed
+                    (pause/resume bất kỳ lúc nào trước terminal; 24h → expired;
+                     lỗi bước quá 3 lần → failed)</div>
+
+  <h3>Luồng một đề xuất</h3>
+  <ol>
+    <li>API validate zod, planner kiểm tra nghiệp vụ: semver hợp lệ, 1–5 người nhận, config key thuộc allowlist.</li>
+    <li>Planner tạo unified diff và risk. Major bump hoặc &gt;3 người nhận là high; bulk email là medium.</li>
+    <li>Run và 5 step được insert trong một lần; audit ghi <code>run_created</code>.</li>
+    <li>Worker tick: validate → simulate (60 ms trong sandbox DB) → dừng ở <code>await_approval</code>, ghi diff vào step output.</li>
+    <li>Người dùng đọc diff và bấm duyệt; quyết định được audit với actor và thời điểm.</li>
+    <li>Tick tiếp: apply kiểm tra step duyệt đã done, ghi sandbox trong transaction kèm idempotency key, verify đọc lại.</li>
+    <li>Nếu verify sai, bước retry tối đa 3 lần rồi run chuyển <code>failed</code>; không retry vô hạn.</li>
+  </ol>
+
+  <h3>Quyết định thiết kế</h3>
+  <h3>Vì sao lưu từng bước thay vì một cột status?</h3>
+  <p>
+    Một cột status không trả lời được “bước nào đã chạy, mấy lần, output gì”. Bảng <code>run_steps</code>
+    có unique <code>(run_id, step)</code> nên retry cập nhật đúng dòng, còn UI dựng timeline từ dữ liệu thật.
+    Đây cũng là cơ sở để resume sau restart: worker đọc <code>current_step</code> và tiếp tục, không chạy lại từ đầu.
+  </p>
+  <h3>Vì sao chặn duyệt trong bước apply, không chỉ ở API?</h3>
+  <p>
+    Nếu chỉ chặn ở UI hoặc endpoint action, một đường gọi worker khác có thể bỏ qua. Bước apply tự query
+    trạng thái <code>await_approval</code> và ném lỗi nếu chưa done. Đây là enforcement ở tầng dữ liệu,
+    nơi không thể vô tình bỏ qua.
+  </p>
+  <h3>Vì sao idempotency key nằm trong transaction?</h3>
+  <p>
+    <code>apply:&lt;runId&gt;</code> là unique key trong <code>tool_calls</code>. Lần apply đầu ghi thay đổi
+    sandbox và key trong cùng transaction; lần sau đọc key và trả về kết quả cũ với cờ <code>skipped</code>.
+    Nếu process chết giữa transaction, rollback xóa cả hai, nên không có trạng thái nửa vời.
+  </p>
+  <h3>Vì sao sandbox chỉ ghi DB?</h3>
+  <p>
+    Demo không được phép gửi email thật hay chạy shell trên máy người khác. <code>sandbox_state</code> mô
+    phỏng <code>package.json</code> và <code>config.json</code>, <code>outbox</code> mô phỏng email. Verify
+    đọc lại đúng các bảng đó, nên toàn bộ vòng lặp vẫn có bằng chứng mà không có tác dụng phụ ra ngoài.
+  </p>
+</section>
+
+<section class="sheet">
+  <h2>3. Trade-off &amp; đo lường</h2>
+
+  <h3>Kết quả đo thật (11/11/2026)</h3>
+  <table>
+    <thead>
+      <tr><th>Metric</th><th>Kết quả</th><th>Nguồn</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Run E2E hoàn tất</td><td><strong>7/7 completed</strong>, 1 rejected</td><td>Luồng script trên bản live</td></tr>
+      <tr><td>Thứ tự bước</td><td><strong>5/5 done</strong></td><td>GET /api/runs</td></tr>
+      <tr><td>Idempotency apply</td><td><strong>outbox 2/2</strong> sau khi tick lại</td><td>Output bước verify</td></tr>
+      <tr><td>Approval latency p50 / p95</td><td><strong>2.366 ms / 3.718 ms</strong> (7 mẫu)</td><td>GET /api/metrics</td></tr>
+      <tr><td>Request latency p50 / p95</td><td><strong>145 ms / 5.393 ms</strong> (30 mẫu)</td><td>GET /api/metrics</td></tr>
+      <tr><td>Retry trên luồng thành công</td><td><strong>0</strong></td><td>GET /api/metrics</td></tr>
+      <tr><td>Rate limit</td><td><strong>429 ở request thứ 10/phút</strong></td><td>Gửi 12 request liên tiếp</td></tr>
+      <tr><td>Unit test</td><td><strong>7/7 pass</strong></td><td>npm test</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Đánh đổi có chủ đích</h3>
+  <ul>
+    <li><strong>Worker poll thay vì queue managed.</strong> Không cần SQS/Redis và billing, nhưng tick là
+        best-effort: không có backoff lịch tự động, người dùng hoặc cron phải gọi. Với tải thật cần queue +
+        visibility timeout + dead-letter.</li>
+    <li><strong>Planner tất định, không LLM.</strong> Diff và risk tái lập được, test được, không tốn token;
+        đổi lại không nhận yêu cầu ngôn ngữ tự do. Tôi chọn chứng minh runtime an toàn trước, rồi mới thêm
+        lớp hiểu ngôn ngữ.</li>
+    <li><strong>Sandbox DB, không container.</strong> An toàn tuyệt đối nhưng chưa chứng minh thay đổi trên
+        filesystem hay network thật. Adapter apply có thể thay sau mà không đổi state machine.</li>
+    <li><strong>Snapshot JSON lên Blob.</strong> Không cần DB managed; đổi lại ghi đồng thời giữa nhiều lambda
+        là last-write-wins. Etag sync giảm đọc cũ, không loại bỏ hoàn toàn mất ghi.</li>
+    <li><strong>Vercel-only thay vì backend Go/Flask.</strong> Một deployment, một ngôn ngữ; đổi lại worker bị
+        giới hạn 30 giây mỗi invocation và cold start PGlite làm p95 request tăng.</li>
+  </ul>
+
+  <div class="warn">
+    Chưa hoàn hảo: approval latency đo bằng độ trễ script bấm duyệt, không phải thời gian người thật suy nghĩ;
+    p95 request bị cold start chi phối; chưa benchmark 100+ run đồng thời; chưa có cron tự động gọi worker;
+    dữ liệu demo là 8 run do chính tôi tạo để kiểm thử. Các số trên là đo thật trong phạm vi demo.
+  </div>
+
+  <h3>Điều gì sẽ làm tiếp</h3>
+  <ul>
+    <li>Thay tick endpoint bằng Vercel Cron + queue có khóa per-run để chạy song song an toàn.</li>
+    <li>Thêm chữ ký và TTL cho idempotency key; đo tỷ lệ duplicate khi giả lập timeout giữa transaction.</li>
+    <li>Mở rộng sandbox sang container ephemeral, giữ nguyên contract apply/verify.</li>
+    <li>Đo approval latency với người thật và phân bố risk theo loại thay đổi.</li>
+  </ul>
+</section>
+
+<section class="sheet">
+  <h2>4. Bài học</h2>
+  <h3>1. Trạng thái phải sống lâu hơn process</h3>
+  <p>
+    Bài kiểm tra thật không phải “chạy được một lần”, mà là dừng giữa chừng, reload, rồi tiếp tục đúng bước.
+    Việc lưu từng step và đọc lại <code>current_step</code> biến resume thành mặc định thay vì tính năng phụ.
+    Nếu chỉ lưu status tổng, worker sẽ phải đoán và dễ chạy lại tác dụng phụ.
+  </p>
+  <h3>2. Idempotency là ràng buộc dữ liệu, không phải lời hứa trong code</h3>
+  <p>
+    Tôi đặt unique key trong bảng và ghi nó cùng transaction với thay đổi. Nhờ vậy, kể cả khi hai lần tick
+    chồng nhau, database mới là nơi phân xử. Kiểm thử live đã xác nhận: tick lại run đã completed vẫn giữ
+    outbox đúng 2 bản ghi, không thành 4.
+  </p>
+  <h3>3. Phê duyệt chỉ có nghĩa khi có bằng chứng đi kèm</h3>
+  <p>
+    Nút approve không đủ. Người duyệt cần diff, risk, output từng bước và lịch sử ai làm gì. Đưa audit log
+    thành bảng riêng giúp trả lời câu hỏi điều tra sau sự cố, đồng thời tạo dữ liệu thật để đo approval latency
+    thay vì ước lượng.
+  </p>
+  <h3>4. Giới hạn phải được viết ra trước khi được hỏi</h3>
+  <p>
+    Worker poll và snapshot Blob là lựa chọn demo-scale. Ghi rõ last-write-wins, giới hạn 30 giây và việc
+    chưa có queue thật quan trọng ngang với việc demo chạy. Người đánh giá cần biết con số nào đáng tin và
+    hệ thống sẽ gãy ở đâu khi tải tăng.
+  </p>
+</section>
+
+</body>
+</html>
